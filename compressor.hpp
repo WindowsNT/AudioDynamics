@@ -656,9 +656,9 @@ public:
 					if (GetSaveFileName(&of))
 					{
 						DeleteFile(fnx.data());
-						XML3::XML x(fnx.data());
-						Ser(x.GetRootElement());
-						x.Save();
+						XML3::XML x4(fnx.data());
+						Ser(x4.GetRootElement());
+						x4.Save();
 					}
 				}
 				if (tcmd == 102)
@@ -673,8 +673,8 @@ public:
 					of.nMaxFile = 10000;
 					if (GetOpenFileName(&of))
 					{
-						XML3::XML x(fnx.data());
-						Unser(x.GetRootElement());
+						XML3::XML x5(fnx.data());
+						Unser(x5.GetRootElement());
 					}
 				}
 				if (tcmd == 83)

@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include "f:\\TOOLS\\xml\\x3\\x3\\xml3all.h"
+#include "xml\\xml3all.h"
 
 #include "compressor.hpp"
 
@@ -92,8 +92,8 @@ void ReadMP3Header(FILE* fp, int& sr, int& nCh)
 
 bool Ending = true;
 using namespace std;
-#include "f:\\TOOLS\\UWL\\rw\\rw.hpp"
-#include "..\\EQ\\wave.h"
+#include "mt\\rw.hpp"
+#include "eq\\wave.h"
 #define MP3_BLOCK_SIZE 522
 CONV conv;
 std::shared_ptr<WOUT> wout;
@@ -614,18 +614,6 @@ LRESULT CALLBACK Main_DP(HWND hh, UINT mm, WPARAM ww, LPARAM ll)
 	return DefWindowProc(hh, mm, ww, ll);
 }
 
-inline void UpdateThread()
-{
-#ifdef _DEBUG
-	if (true)
-		return;
-#endif
-
-	CoInitializeEx(0, COINIT_MULTITHREADED);
-	TU::TU tu("f3cf159b-de75-4427-8fe0-81a7ae61d3fa", L"www.turboirc.com", L"/update2/tu.php", true, 443, 0, 0, 0, L"");
-	tu.OneOff("90E6C42E-8BC1-454A-B79F-0E2DACA1220B", true, 0, true);
-}
-
 
 int __stdcall WinMain(HINSTANCE h, HINSTANCE, LPSTR, int)
 	{
@@ -693,41 +681,6 @@ int __stdcall WinMain(HINSTANCE h, HINSTANCE, LPSTR, int)
 		DispatchMessage(&msg);
 	}
 	ExitProcess(0);
-
-/*
-	float f[48000] = {};
-	float f2[48000] = {};
-	for (int i = 0; i < 48000; i++)
-	{
-		f[i] = 0;
-		f[i] += 1 * sin(110.0f * 2 * 3.14f * i / 48000.0f);
-		f[i] += 0.8f * sin(554.37f * 2 * 3.14f * i / 48000.0f);
-	}
-	COMPBAND b[3];
-	b[0].from = 0;
-	b[0].to = COMP::MaxHz / 200.0f;
-	b[1].from = b[0].to;
-	b[1].to = COMP::MaxHz / 500.0f;
-	b[2].from = b[1].to;
-	b[2].to = 1;
-	COMP c({ b[0],b[1],b[2] });
-	
-	int j = 480;
-	for (int i = 0; i < 48000; i += j)
-	{
-		float* ff1 = f + i;
-		float* ff2 = f2 + i;
-		c.process(48000, ff1, j, ff2, 0);
-		ff2 = ff2;
-	}
-	FILE* fw1 = 0;
-	_wfopen_s(&fw1, L"r:\\1.pcm", L"wb");
-	fwrite(f, 4, 48000, fw1);
-	fclose(fw1);
-	_wfopen_s(&fw1, L"r:\\2.pcm", L"wb");
-	fwrite(f2, 4, 48000, fw1);
-	fclose(fw1);
-*/
 	return 0;
 	}
 

@@ -37,8 +37,6 @@
 #include <atlsafe.h>
 
 
-// #include "f:\\tools\\output\\include\\xml3.h"
-
 
 #include <stdio.h>
 #include <stack>
@@ -53,8 +51,8 @@
 #include <vector>
 #include <memory>
 #include <functional>
-#include "f:\\tools\\tu8\\tu.hpp"
 
+#include "update.hpp"
 
 
 #pragma comment(lib,"d2d1.lib")
