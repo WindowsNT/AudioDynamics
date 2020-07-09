@@ -1,0 +1,9 @@
+[submodule "xml"]
+	path = xml
+	url = https://github.com/WindowsNT/xml
+[submodule "mt"]
+	path = mt
+	url = https://github.com/WindowsNT/mt
+[submodule "eq"]
+	path = eq
+	url = https://github.com/WindowsNT/eq
