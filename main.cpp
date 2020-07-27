@@ -238,6 +238,7 @@ int VC()
 }
 
 
+int nCh = 1;
 void StartMP3(std::wstring fi)
 {
 	using namespace std;
@@ -245,7 +246,6 @@ void StartMP3(std::wstring fi)
 	_wfopen_s(&fp, fi.c_str(), L"rb");
 	if (!fp)
 		return;
-	int nCh = 0;
 	ReadMP3Header(fp, SR, nCh);
 	if (!SR)
 		return;
@@ -254,7 +254,7 @@ void StartMP3(std::wstring fi)
 
 	wout = 0;
 	wout = make_shared<WOUT>();
-	wout->Open(WAVE_MAPPER, SR, 16);
+	wout->Open(WAVE_MAPPER, SR, 16,nCh);
 
 	vector<char> ww(1000);
 	WAVEFORMATEX* w2 = (WAVEFORMATEX*)ww.data();
@@ -282,7 +282,7 @@ void StartMP3(std::wstring fi)
 	WAVEFORMATEX* wDest = (WAVEFORMATEX*)e.data();
 	wDest->wFormatTag = WAVE_FORMAT_PCM;
 	wDest->nSamplesPerSec = w.nSamplesPerSec;
-	wDest->nChannels = 1;
+	wDest->nChannels = (WORD)nCh;
 	wDest->wBitsPerSample = 16;
 	auto f = acmFormatSuggest(0, &w, wDest, 1000, ACM_FORMATSUGGESTF_NSAMPLESPERSEC | ACM_FORMATSUGGESTF_WFORMATTAG | ACM_FORMATSUGGESTF_NCHANNELS | ACM_FORMATSUGGESTF_WBITSPERSAMPLE);
 	if (f)
@@ -318,7 +318,7 @@ void StartMP3(std::wstring fi)
 	if (true)
 	{
 		std::lock_guard<std::recursive_mutex> lg(mu);
-		prx.Build(SR,0);
+		prx.Build(SR,0,nCh);
 
 	}
 
@@ -355,10 +355,11 @@ void StartMP3(std::wstring fi)
 			vector<float> d2(fsz);
 			conv.f16t32((const short*)dx.data(), fsz, d2.data());
 
-			vector<float> de = d2;
-
-			if (true)
+			if (nCh == 1)
 			{
+				vector<float> de = d2;
+				float* fde = de.data();
+				float* fd2 = d2.data();
 				std::lock_guard<std::recursive_mutex> lg(mu);
 				if (prx.GetChains().size() == 1 && prx.GetChains()[0].A)
 				{
@@ -366,24 +367,62 @@ void StartMP3(std::wstring fi)
 					auto s = CurrentVC[0].size();
 					if (s >= fsz)
 					{
-						prx.process(SR, d2.data(), fsz, de.data(),&CurrentVC, 0);
+						prx.process(SR, nCh,&fd2, fsz, &fde,&CurrentVC, 0);
 						CurrentVC[0].erase(CurrentVC[0].begin(), CurrentVC[0].begin() + fsz);
 					}
 					else
 					{
-						prx.process(SR, d2.data(), fsz, de.data(), 0, 0);
+						prx.process(SR, nCh,&fd2, fsz, &fde, 0, 0);
 					}
 				}
 				else
-					prx.process(SR, d2.data(), fsz, de.data(), 0, 0);
+					prx.process(SR, nCh, &fd2, fsz, &fde, 0, 0);
+				vector<short> d4(fsz * 2);
+				memcpy(d2.data(), de.data(), fsz * sizeof(float));
+				conv.f32t16(d2.data(), fsz, d4.data());
+				if (wout)
+					wout->Write((const char*)d4.data(), fsz * 2);
+
+			}
+			if (nCh == 2)
+			{
+				// d2 is interleaved
+				int bT = fsz / nCh;
+				std::vector<float*> bin(nCh);
+				std::vector<float*> bout(nCh);
+				std::vector<std::vector<float>> xin(nCh);
+				std::vector<std::vector<float>> xout(nCh);
+				for (int i = 0; i < nCh; i++)
+				{
+					xin[i].resize(bT);
+					bin[i] = xin[i].data();
+					xout[i].resize(bT);
+					bout[i] = xout[i].data();
+				}
+				int n = 0;
+				for (int i = 0; i < bT; i++)
+				{
+					for (int ich = 0; ich < nCh; ich++)
+					{
+						xin[ich][i] = d2[n++];
+					}
+				}
+				prx.process(SR, nCh, bin.data(), bT, bout.data(),0,0); //*
+				n = 0;
+				for (int i = 0; i < bT; i++)
+				{
+					for (int ich = 0; ich < nCh; ich++)
+					{
+						d2[n++] = xout[ich][i];
+					}
+				}
+
+				vector<short> d4(fsz);
+				conv.f32t16(d2.data(), fsz, d4.data());
+				if (wout)
+					wout->Write((const char*)d4.data(), fsz*2);
 			}
 
-
-			vector<short> d4(fsz * 2);
-			memcpy(d2.data(), de.data(), fsz * sizeof(float));
-			conv.f32t16(d2.data(), fsz, d4.data());
-			if (wout)
-				wout->Write((const char*)d4.data(), fsz * 2);
 
 			dx.erase(dx.begin(), dx.begin() + BS * 2);
 		}
@@ -580,11 +619,6 @@ LRESULT CALLBACK Main_DP(HWND hh, UINT mm, WPARAM ww, LPARAM ll)
 				fa->CreateHwndRenderTarget(D2D1::RenderTargetProperties(), D2D1::HwndRenderTargetProperties(hh, D2D1::SizeU(rc.right - rc.left, rc.bottom - rc.top)), &d);
 			}
 			d->BeginDraw();
-			if (true)
-			{
-				std::lock_guard<std::recursive_mutex> lg(mu);
-				prx.Build(SR,0);
-			}
 			prx.Paint(fa, d, rc);
 			d->EndDraw();
 			EndPaint(hh, &ps);

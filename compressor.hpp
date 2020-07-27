@@ -7,27 +7,27 @@
 #include "..\\DSPFilters\\DSPFilters\\include\\DspFilters\\ChebyshevI.h"
 #include "..\\DSPFilters\\DSPFilters\\include\\DspFilters\\Butterworth.h"
 #else
-#include "f:\TP2\\EQ\\alldspfilters.hpp"
+#include ".\\eq\alldspfilters.hpp"
 void nop() {}
 #define shared_ptr_debug shared_ptr
 #define make_shared_debug make_shared
 #endif
 
 
-typedef Dsp::SimpleFilter<Dsp::Butterworth::LowPass<100>, 1> ButtLP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevI::LowPass<100>, 1> Che1LP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevII::LowPass<100>, 1> Che2LP;
-typedef Dsp::SimpleFilter<Dsp::Elliptic::LowPass<100>, 1> EllLP;
+typedef Dsp::SimpleFilter<Dsp::Butterworth::LowPass<100>, 2> ButtLP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevI::LowPass<100>, 2> Che1LP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevII::LowPass<100>, 2> Che2LP;
+typedef Dsp::SimpleFilter<Dsp::Elliptic::LowPass<100>, 2> EllLP;
 
-typedef Dsp::SimpleFilter<Dsp::Butterworth::HighPass<100>, 1> ButtHP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevI::HighPass<100>, 1> Che1HP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevII::HighPass<100>, 1> Che2HP;
-typedef Dsp::SimpleFilter<Dsp::Elliptic::HighPass<100>, 1> EllHP;
+typedef Dsp::SimpleFilter<Dsp::Butterworth::HighPass<100>, 2> ButtHP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevI::HighPass<100>, 2> Che1HP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevII::HighPass<100>, 2> Che2HP;
+typedef Dsp::SimpleFilter<Dsp::Elliptic::HighPass<100>, 2> EllHP;
 
-typedef Dsp::SimpleFilter<Dsp::Butterworth::BandPass<100>, 1> ButtBP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevI::BandPass<100>, 1> Che1BP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevII::BandPass<100>, 1> Che2BP;
-typedef Dsp::SimpleFilter<Dsp::Elliptic::BandPass<100>, 1> EllBP;
+typedef Dsp::SimpleFilter<Dsp::Butterworth::BandPass<100>, 2> ButtBP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevI::BandPass<100>, 2> Che1BP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevII::BandPass<100>, 2> Che2BP;
+typedef Dsp::SimpleFilter<Dsp::Elliptic::BandPass<100>, 2> EllBP;
 
 enum class COMPSTATE
 {
@@ -98,6 +98,8 @@ struct COMPPARAMS
 
 };
 
+#define DYNAMIC_CHANNEL
+
 struct COMPBAND
 {
 	float from = 0;
@@ -146,8 +148,13 @@ struct COMPBAND
 	D2D1_RECT_F ButtMakeup = {};
 
 	std::shared_ptr_debug<void> sf;
-	std::vector<float> in;
-	std::vector<float> out;
+#ifdef DYNAMIC_CHANNEL
+	std::vector<std::vector<float>> din;
+	std::vector<std::vector<float>> dout;
+#else
+	std::array<std::vector<float>, 2> in;
+	std::array<std::vector<float>, 2> out;
+#endif
 	COMPPARAMS comp;
 };
 
@@ -1272,16 +1279,37 @@ public:
 	}
 
 	int TheSR = 0;
-	void Build(int SR, int ns)
+	int LastBuildChannel = 0;
+	void Build(int SR, int ns,int nch)
 	{
+		if (LastBuildChannel != nch)
+		{
+			// All filters off
+			for (auto& bb : b)
+			{
+				bb.sf = 0;
+			}
+		}
+		LastBuildChannel = nch;
 		std::lock_guard<std::recursive_mutex> lg(mu);
 		TheSR = SR;
 		// Filter x num
 		for (size_t ib = 0; ib < b.size(); ib++)
 		{
 			auto& bb = b[ib];
-			bb.in.resize(ns);
-			bb.out.resize(ns);
+#ifdef DYNAMIC_CHANNEL
+			bb.din.resize(nch);
+			bb.dout.resize(nch);
+			for (auto& d : bb.din)
+				d.resize(ns);
+			for (auto& d : bb.dout)
+				d.resize(ns);
+#else
+			bb.in[0].resize(ns);
+			bb.in[1].resize(ns);
+			bb.out[0].resize(ns);
+			bb.out[1].resize(ns);
+#endif
 
 			if (ib == 0)
 			{
@@ -1293,24 +1321,28 @@ public:
 					if (bb.Type == 0)
 					{
 						auto sf2 = std::make_shared_debug<ButtLP>();
+						sf2->setNumChannels(nch);
 						sf2->setup(bb.Order, SR, fr);
 						sf = sf2;
 					}
 					if (bb.Type == 1)
 					{
 						auto sf2 = std::make_shared_debug<Che1LP>();
+						sf2->setNumChannels(nch);
 						sf2->setup(bb.Order, SR, fr, bb.ripple);
 						sf = sf2;
 					}
 					if (bb.Type == 2)
 					{
 						auto sf2 = std::make_shared_debug<Che2LP>();
+						sf2->setNumChannels(nch);
 						sf2->setup(bb.Order, SR, fr, bb.ripple);
 						sf = sf2;
 					}
 					if (bb.Type == 3)
 					{
 						auto sf2 = std::make_shared_debug<EllLP>();
+						sf2->setNumChannels(nch);
 						sf2->setup(bb.Order, SR, fr, bb.ripple, bb.rolloff);
 						sf = sf2;
 					}
@@ -1327,24 +1359,28 @@ public:
 						if (bb.Type == 0)
 						{
 							auto sf2 = std::make_shared_debug<ButtHP>();
+							sf2->setNumChannels(nch);
 							sf2->setup(bb.Order, SR, fr);
 							sf = sf2;
 						}
 						if (bb.Type == 1)
 						{
 							auto sf2 = std::make_shared_debug<Che1HP>();
+							sf2->setNumChannels(nch);
 							sf2->setup(bb.Order, SR, fr, bb.ripple);
 							sf = sf2;
 						}
 						if (bb.Type == 2)
 						{
 							auto sf2 = std::make_shared_debug<Che2HP>();
+							sf2->setNumChannels(nch);
 							sf2->setup(bb.Order, SR, fr, bb.ripple);
 							sf = sf2;
 						}
 						if (bb.Type == 3)
 						{
 							auto sf2 = std::make_shared_debug<EllHP>();
+							sf2->setNumChannels(nch);
 							sf2->setup(bb.Order, SR, fr, bb.ripple, bb.rolloff);
 							sf = sf2;
 						}
@@ -1361,24 +1397,28 @@ public:
 						if (bb.Type == 0)
 						{
 							auto sf2 = std::make_shared_debug<ButtBP>();
+							sf2->setNumChannels(nch);
 							sf2->setup(bb.Order, SR, fr1 + (fr2 - fr1) / 2.0, (fr2 - fr1) / 2.0);
 							sf = sf2;
 						}
 						if (bb.Type == 1)
 						{
 							auto sf2 = std::make_shared_debug<Che1BP>();
+							sf2->setNumChannels(nch);
 							sf2->setup(bb.Order, SR, fr1 + (fr2 - fr1) / 2.0, (fr2 - fr1) / 2.0, bb.ripple);
 							sf = sf2;
 						}
 						if (bb.Type == 2)
 						{
 							auto sf2 = std::make_shared_debug<Che2BP>();
+							sf2->setNumChannels(nch);
 							sf2->setup(bb.Order, SR, fr1 + (fr2 - fr1) / 2.0, (fr2 - fr1) / 2.0, bb.ripple);
 							sf = sf2;
 						}
 						if (bb.Type == 3)
 						{
 							auto sf2 = std::make_shared_debug<EllBP>();
+							sf2->setNumChannels(nch);
 							sf2->setup(bb.Order, SR, fr1 + (fr2 - fr1) / 2.0, (fr2 - fr1) / 2.0, bb.ripple, bb.rolloff);
 							sf = sf2;
 						}
@@ -1389,8 +1429,16 @@ public:
 	}
 
 
-	void process(int SR, float* input, int ns, float* output, std::vector<std::vector<float>>* chainin, bool ForceUnTrigger)
+#ifndef DYNAMIC_CHANNEL
+	std::vector<float> empty1;
+	std::vector<float> empty2;
+#endif
+	void process(int SR, int nch,float** inputs, int ns, float** outputs, std::vector<std::vector<float>>* chainin, bool ForceUnTrigger)
 	{
+		if (nch == 0 || inputs == 0 || outputs == 0 || ns == 0)
+			return;
+		if (nch != LastBuildChannel)
+			Build(SR, ns, nch);
 		Ensure();
 		bool M = false;
 		if (!Single())
@@ -1432,19 +1480,19 @@ public:
 				if (bb.comp.state == COMPSTATE::NONE || bb.comp.state == COMPSTATE::ATTACK)
 				{
 					bb.comp.state = COMPSTATE::NONE;
-					memcpy(output, input, ns * sizeof(float));
+					for(int ich = 0 ; ich < nch ; ich++)
+						memcpy(outputs[ich], inputs[ich], ns * sizeof(float));
 
 					// Detect the db
 					float max_sample = 0;
 					for (int i = 0; i < ns; i++)
 					{
-						float s = fabs(input[i]);
+						float s = fabs(inputs[0][i]);
 						if (max_sample < s)
 							max_sample = s;
 					}
 					float db = lin2db(max_sample);
 					bb.LastInputDB = db;
-
 					return;
 				}
 			}
@@ -1453,72 +1501,178 @@ public:
 		// Setup the filters
 		if (M)
 		{
-			Build(SR, ns);
+			Build(SR, ns,nch);
 		}
 
-		for (size_t ib = 0; ib < b.size(); ib++)
+
+		if (M)
 		{
-			float* d = input;
-			float* o = output;
-			auto& bb = b[ib];
-			if (M)
+#ifdef DYNAMIC_CHANNEL
+			for (size_t ib = 0; ib < b.size(); ib++)
 			{
-				d = bb.in.data();
-				o = bb.out.data();
-				memcpy(d, input, ns * sizeof(float));
+				auto& bb = b[ib];
+				float* ins[100] = { 0 }; // 100ch max :)
+				for (int ich = 0; ich < nch; ich++)
+				{
+					ins[ich] = bb.din[ich].data();
+					memcpy(ins[ich], inputs[ich], ns * sizeof(float));
+				}
+
+
 				if (ib == 0) // Low Pass
 				{
 					if (bb.Type == 0)
 					{
 						std::shared_ptr_debug<ButtLP> fx;
 						fx = std::static_pointer_cast<ButtLP>(bb.sf);
-						fx->process(ns, &d);
+						fx->process(ns, ins);
 					}
 					if (bb.Type == 1)
 					{
 						std::shared_ptr_debug<Che1LP> fx;
 						fx = std::static_pointer_cast<Che1LP>(bb.sf);
-						fx->process(ns, &d);
+						fx->process(ns, ins);
 					}
 					if (bb.Type == 2)
 					{
 						std::shared_ptr_debug<Che2LP> fx;
 						fx = std::static_pointer_cast<Che2LP>(bb.sf);
-						fx->process(ns, &d);
+						fx->process(ns, ins);
 					}
 					if (bb.Type == 3)
 					{
 						std::shared_ptr_debug<EllLP> fx;
 						fx = std::static_pointer_cast<EllLP>(bb.sf);
-						fx->process(ns, &d);
+						fx->process(ns, ins);
 					}
 				}
 				else
+				if (ib == b.size() - 1) // high Pass
+				{
+					if (bb.Type == 0)
+					{
+						std::shared_ptr_debug<ButtHP> fx;
+						fx = std::static_pointer_cast<ButtHP>(bb.sf);
+						fx->process(ns, ins);
+					}
+					if (bb.Type == 1)
+					{
+						std::shared_ptr_debug<Che1HP> fx;
+						fx = std::static_pointer_cast<Che1HP>(bb.sf);
+						fx->process(ns, ins);
+					}
+					if (bb.Type == 2)
+					{
+						std::shared_ptr_debug<Che2HP> fx;
+						fx = std::static_pointer_cast<Che2HP>(bb.sf);
+						fx->process(ns, ins);
+					}
+					if (bb.Type == 3)
+					{
+						std::shared_ptr_debug<EllHP> fx;
+						fx = std::static_pointer_cast<EllHP>(bb.sf);
+						fx->process(ns, ins);
+					}
+				}
+				else // Bandpass
+				{
+					if (bb.Type == 0)
+					{
+						std::shared_ptr_debug<ButtBP> fx;
+						fx = std::static_pointer_cast<ButtBP>(bb.sf);
+						fx->process(ns, ins);
+					}
+					if (bb.Type == 1)
+					{
+						std::shared_ptr_debug<Che1BP> fx;
+						fx = std::static_pointer_cast<Che1BP>(bb.sf);
+						fx->process(ns, ins);
+					}
+					if (bb.Type == 2)
+					{
+						std::shared_ptr_debug<Che2BP> fx;
+						fx = std::static_pointer_cast<Che2BP>(bb.sf);
+						fx->process(ns, ins);
+					}
+					if (bb.Type == 3)
+					{
+						std::shared_ptr_debug<EllBP> fx;
+						fx = std::static_pointer_cast<EllBP>(bb.sf);
+						fx->process(ns, ins);
+					}
+				}
+			}
+#else // stereo
+			// Process multi-channel filters
+			empty1.resize(ns);
+			empty2.resize(ns);
+			for (int ich = 0; ich < nch; ich += 2)
+			{
+				auto input1 = inputs[ich];
+				auto input2 = (ich == (nch - 1) ? empty1.data() : inputs[ich + 1]);
+				for (size_t ib = 0; ib < b.size(); ib++)
+				{
+					auto& bb = b[ib];
+					float* ins[2];
+					ins[0] = bb.in[0].data();
+					ins[1] = bb.in[1].data();
+
+					memcpy(ins[0], input1, ns * sizeof(float));
+					memcpy(ins[1], input2, ns * sizeof(float));
+
+					if (ib == 0) // Low Pass
+					{
+						if (bb.Type == 0)
+						{
+							std::shared_ptr_debug<ButtLP> fx;
+							fx = std::static_pointer_cast<ButtLP>(bb.sf);
+							fx->process(ns, ins);
+						}
+						if (bb.Type == 1)
+						{
+							std::shared_ptr_debug<Che1LP> fx;
+							fx = std::static_pointer_cast<Che1LP>(bb.sf);
+							fx->process(ns, ins);
+						}
+						if (bb.Type == 2)
+						{
+							std::shared_ptr_debug<Che2LP> fx;
+							fx = std::static_pointer_cast<Che2LP>(bb.sf);
+							fx->process(ns, ins);
+						}
+						if (bb.Type == 3)
+						{
+							std::shared_ptr_debug<EllLP> fx;
+							fx = std::static_pointer_cast<EllLP>(bb.sf);
+							fx->process(ns, ins);
+						}
+					}
+					else
 					if (ib == b.size() - 1) // high Pass
 					{
 						if (bb.Type == 0)
 						{
 							std::shared_ptr_debug<ButtHP> fx;
 							fx = std::static_pointer_cast<ButtHP>(bb.sf);
-							fx->process(ns, &d);
+							fx->process(ns, ins);
 						}
 						if (bb.Type == 1)
 						{
 							std::shared_ptr_debug<Che1HP> fx;
 							fx = std::static_pointer_cast<Che1HP>(bb.sf);
-							fx->process(ns, &d);
+							fx->process(ns, ins);
 						}
 						if (bb.Type == 2)
 						{
 							std::shared_ptr_debug<Che2HP> fx;
 							fx = std::static_pointer_cast<Che2HP>(bb.sf);
-							fx->process(ns, &d);
+							fx->process(ns, ins);
 						}
 						if (bb.Type == 3)
 						{
 							std::shared_ptr_debug<EllHP> fx;
 							fx = std::static_pointer_cast<EllHP>(bb.sf);
-							fx->process(ns, &d);
+							fx->process(ns, ins);
 						}
 					}
 					else // Bandpass
@@ -1527,268 +1681,272 @@ public:
 						{
 							std::shared_ptr_debug<ButtBP> fx;
 							fx = std::static_pointer_cast<ButtBP>(bb.sf);
-							fx->process(ns, &d);
+							fx->process(ns, ins);
 						}
 						if (bb.Type == 1)
 						{
 							std::shared_ptr_debug<Che1BP> fx;
 							fx = std::static_pointer_cast<Che1BP>(bb.sf);
-							fx->process(ns, &d);
+							fx->process(ns, ins);
 						}
 						if (bb.Type == 2)
 						{
 							std::shared_ptr_debug<Che2BP> fx;
 							fx = std::static_pointer_cast<Che2BP>(bb.sf);
-							fx->process(ns, &d);
+							fx->process(ns, ins);
 						}
 						if (bb.Type == 3)
 						{
 							std::shared_ptr_debug<EllBP> fx;
 							fx = std::static_pointer_cast<EllBP>(bb.sf);
-							fx->process(ns, &d);
-						}
-
-					}
-			}
-
-
-			int AttackSamples = (int)(SR * bb.comp.attack);
-			int ReleaseSamples = (int)(SR * bb.comp.release);
-			int HoldSamples = (int)(SR * bb.comp.hold);
-
-			// Detect the db
-			float max_sample = 0;
-			for (int i = 0; i < ns; i++)
-			{
-				float s = fabs(d[i]);
-				if (max_sample < s)
-					max_sample = s;
-			}
-			float db = lin2db(max_sample);
-			bb.LastInputDB = db;
-
-
-
-			if (bb.comp.Mode == COMPMODE::GATE)
-			{
-				for (int i = 0; i < ns; i++)
-				{
-					if (bb.comp.state == COMPSTATE::NONE)
-					{
-						// Gate closed
-						if (db < bb.comp.threshold)
-						{
-							o[i] = 0;
-							continue;
-						}
-						else
-						{
-							// Create an attack
-							bb.comp.state = COMPSTATE::ATTACK;
-							bb.comp.SamplesLeftforProgress = AttackSamples;
-						}
-					}
-
-					if (bb.comp.state == COMPSTATE::ATTACK)
-					{
-						if (db < bb.comp.hysteresis)
-						{
-							o[i] = 0;
-							bb.comp.state = COMPSTATE::NONE;
-							continue;
-						}
-
-						if (bb.comp.SamplesLeftforProgress == 0)
-							bb.comp.state = COMPSTATE::ACTION;
-						else
-						{
-							// slow to full 
-							float lin1 = db2lin(bb.comp.hysteresis);
-							// In ReleaseSamples, lin1
-							// in remain samples , ? 
-							float lin2 = lin1 * (AttackSamples - bb.comp.SamplesLeftforProgress) / (float)AttackSamples;
-							o[i] = (lin2 / lin1) * d[i];
-							bb.comp.SamplesLeftforProgress--;
-							continue;
-						}
-					}
-
-					if (bb.comp.state == COMPSTATE::RELEASE)
-					{
-						if (db > bb.comp.threshold)
-						{
-							bb.comp.state = COMPSTATE::ACTION;
-							continue;
-						}
-						if (bb.comp.SamplesLeftforProgress == 0)
-							bb.comp.state = COMPSTATE::NONE;
-						else
-						{
-							// full to slow
-							float lin1 = db2lin(bb.comp.hysteresis);
-							// In ReleaseSamples, lin1
-							// in remain samples , ? 
-							float lin2 = lin1 * bb.comp.SamplesLeftforProgress / (float)ReleaseSamples;
-							o[i] = (lin2/lin1)*d[i];
-							bb.comp.SamplesLeftforProgress--;
-							continue;
-						}
-					}
-
-					if (bb.comp.state == COMPSTATE::HOLD)
-					{
-						if (db >= bb.comp.threshold)
-							bb.comp.state = COMPSTATE::ACTION;
-						else
-						{
-							if (bb.comp.SamplesLeftforProgress == 0)
-							{
-								bb.comp.state = COMPSTATE::RELEASE;
-								bb.comp.SamplesLeftforProgress = ReleaseSamples;
-							}
-							else
-							{
-								bb.comp.SamplesLeftforProgress--;
-								o[i] = d[i];
-								continue;
-							}
-						}
-					}
-
-
-					if (bb.comp.state == COMPSTATE::ACTION)
-					{
-						d[i] = o[i];
-						if (db < bb.comp.hysteresis)
-						{
-							bb.comp.state = COMPSTATE::HOLD;
-							bb.comp.SamplesLeftforProgress = HoldSamples;
+							fx->process(ns, ins);
 						}
 					}
 				}
 			}
-			else
+#endif
+		}
+
+		for (int ich = 0; ich < nch; ich++)
+		{
+			auto input = inputs[ich];
+			auto output = outputs[ich];
+			for (size_t ib = 0; ib < b.size(); ib++)
 			{
-				bool ShouldRun = 0;
-				if (db < bb.comp.threshold && bb.comp.Mode == COMPMODE::DEXPANDER)
-					ShouldRun = 1;
-				if (db > bb.comp.threshold && bb.comp.Mode == COMPMODE::UEXPANDER)
-					ShouldRun = 1;
-				if (bb.comp.Mode == COMPMODE::UDEXPANDER)
-					ShouldRun = 1;
-				if (db > bb.comp.threshold && bb.comp.Mode == COMPMODE::COMPRESSOR)
-					ShouldRun = 1;
-
-				if (!ShouldRun || !Trigger)
+				float* d = input;
+				float* o = output;
+				auto& bb = b[ib];
+				if (M)
 				{
-					if (bb.comp.state == COMPSTATE::ACTION)
-					{
-						// Hold
-						bb.comp.state = COMPSTATE::HOLD;
-						bb.comp.SamplesLeftforProgress = HoldSamples;
+					d = bb.din[ich].data();
+					o = bb.dout[ich].data();
+				}
 
-						if (bb.comp.SamplesLeftforProgress == 0)
+
+				int AttackSamples = (int)(SR * bb.comp.attack);
+				int ReleaseSamples = (int)(SR * bb.comp.release);
+				int HoldSamples = (int)(SR * bb.comp.hold);
+
+				// Detect the db
+				float max_sample = 0;
+				for (int i = 0; i < ns; i++)
+				{
+					float s = fabs(d[i]);
+					if (max_sample < s)
+						max_sample = s;
+				}
+				float db = lin2db(max_sample);
+				bb.LastInputDB = db;
+
+
+
+				if (bb.comp.Mode == COMPMODE::GATE)
+				{
+					for (int i = 0; i < ns; i++)
+					{
+						if (bb.comp.state == COMPSTATE::NONE)
 						{
-							// Start Release
-							bb.comp.state = COMPSTATE::RELEASE;
-							bb.comp.SamplesLeftforProgress = ReleaseSamples;
+							// Gate closed
+							if (db < bb.comp.threshold)
+							{
+								o[i] = 0;
+								continue;
+							}
+							else
+							{
+								// Create an attack
+								bb.comp.state = COMPSTATE::ATTACK;
+								bb.comp.SamplesLeftforProgress = AttackSamples;
+							}
+						}
+
+						if (bb.comp.state == COMPSTATE::ATTACK)
+						{
+							if (db < bb.comp.hysteresis)
+							{
+								o[i] = 0;
+								bb.comp.state = COMPSTATE::NONE;
+								continue;
+							}
 
 							if (bb.comp.SamplesLeftforProgress == 0)
+								bb.comp.state = COMPSTATE::ACTION;
+							else
+							{
+								// slow to full 
+								float lin1 = db2lin(bb.comp.hysteresis);
+								// In ReleaseSamples, lin1
+								// in remain samples , ? 
+								float lin2 = lin1 * (AttackSamples - bb.comp.SamplesLeftforProgress) / (float)AttackSamples;
+								o[i] = (lin2 / lin1) * d[i];
+								bb.comp.SamplesLeftforProgress--;
+								continue;
+							}
+						}
+
+						if (bb.comp.state == COMPSTATE::RELEASE)
+						{
+							if (db > bb.comp.threshold)
+							{
+								bb.comp.state = COMPSTATE::ACTION;
+								continue;
+							}
+							if (bb.comp.SamplesLeftforProgress == 0)
+								bb.comp.state = COMPSTATE::NONE;
+							else
+							{
+								// full to slow
+								float lin1 = db2lin(bb.comp.hysteresis);
+								// In ReleaseSamples, lin1
+								// in remain samples , ? 
+								float lin2 = lin1 * bb.comp.SamplesLeftforProgress / (float)ReleaseSamples;
+								o[i] = (lin2 / lin1) * d[i];
+								bb.comp.SamplesLeftforProgress--;
+								continue;
+							}
+						}
+
+						if (bb.comp.state == COMPSTATE::HOLD)
+						{
+							if (db >= bb.comp.threshold)
+								bb.comp.state = COMPSTATE::ACTION;
+							else
+							{
+								if (bb.comp.SamplesLeftforProgress == 0)
+								{
+									bb.comp.state = COMPSTATE::RELEASE;
+									bb.comp.SamplesLeftforProgress = ReleaseSamples;
+								}
+								else
+								{
+									bb.comp.SamplesLeftforProgress--;
+									o[i] = d[i];
+									continue;
+								}
+							}
+						}
+
+
+						if (bb.comp.state == COMPSTATE::ACTION)
+						{
+							d[i] = o[i];
+							if (db < bb.comp.hysteresis)
+							{
+								bb.comp.state = COMPSTATE::HOLD;
+								bb.comp.SamplesLeftforProgress = HoldSamples;
+							}
+						}
+					}
+				}
+				else
+				{
+					bool ShouldRun = 0;
+					if (db < bb.comp.threshold && bb.comp.Mode == COMPMODE::DEXPANDER)
+						ShouldRun = 1;
+					if (db > bb.comp.threshold && bb.comp.Mode == COMPMODE::UEXPANDER)
+						ShouldRun = 1;
+					if (bb.comp.Mode == COMPMODE::UDEXPANDER)
+						ShouldRun = 1;
+					if (db > bb.comp.threshold && bb.comp.Mode == COMPMODE::COMPRESSOR)
+						ShouldRun = 1;
+
+					if (!ShouldRun || !Trigger)
+					{
+						if (bb.comp.state == COMPSTATE::ACTION)
+						{
+							// Hold
+							bb.comp.state = COMPSTATE::HOLD;
+							bb.comp.SamplesLeftforProgress = HoldSamples;
+
+							if (bb.comp.SamplesLeftforProgress == 0)
+							{
+								// Start Release
+								bb.comp.state = COMPSTATE::RELEASE;
+								bb.comp.SamplesLeftforProgress = ReleaseSamples;
+
+								if (bb.comp.SamplesLeftforProgress == 0)
+								{
+									bb.comp.state = COMPSTATE::NONE;
+									bb.comp.SamplesLeftforProgress = 0;
+								}
+							}
+						}
+						else
+							if (bb.comp.state == COMPSTATE::RELEASE || bb.comp.state == COMPSTATE::HOLD)
+							{
+
+							}
+							else
 							{
 								bb.comp.state = COMPSTATE::NONE;
 								bb.comp.SamplesLeftforProgress = 0;
 							}
-						}
 					}
 					else
-						if (bb.comp.state == COMPSTATE::RELEASE || bb.comp.state == COMPSTATE::HOLD)
+					{
+						if (bb.comp.state == COMPSTATE::NONE)
 						{
-
+							bb.comp.SamplesLeftforProgress = AttackSamples;
+							bb.comp.state = COMPSTATE::ATTACK;
+							if (AttackSamples == 0)
+								bb.comp.state = COMPSTATE::ACTION;
 						}
-						else
+					}
+
+					if (ShouldRun && Trigger && bb.comp.state == COMPSTATE::HOLD)
+					{
+						bb.comp.state = COMPSTATE::ACTION;
+						bb.comp.SamplesLeftforProgress = 0;
+					}
+					else
+						if (ShouldRun && Trigger && bb.comp.state == COMPSTATE::RELEASE)
 						{
-							bb.comp.state = COMPSTATE::NONE;
+							bb.comp.state = COMPSTATE::ACTION;
 							bb.comp.SamplesLeftforProgress = 0;
 						}
-				}
-				else
-				{
-					if (bb.comp.state == COMPSTATE::NONE)
+
+
+
+					if (bb.comp.state == COMPSTATE::NONE && !M)
 					{
-						bb.comp.SamplesLeftforProgress = AttackSamples;
-						bb.comp.state = COMPSTATE::ATTACK;
-						if (AttackSamples == 0)
-							bb.comp.state = COMPSTATE::ACTION;
+						memcpy(o, d, ns * sizeof(float));
 					}
-				}
-
-				if (ShouldRun && Trigger && bb.comp.state == COMPSTATE::HOLD)
-				{
-					bb.comp.state = COMPSTATE::ACTION;
-					bb.comp.SamplesLeftforProgress = 0;
-				}
-				else
-				if (ShouldRun && Trigger && bb.comp.state == COMPSTATE::RELEASE)
-				{
-					bb.comp.state = COMPSTATE::ACTION;
-					bb.comp.SamplesLeftforProgress = 0;
-				}
-
-
-
-				if (bb.comp.state == COMPSTATE::NONE && !M)
-				{
-					memcpy(o, d, ns * sizeof(float));
-				}
-				else
-				{
-					// Calculate R
-					for (int i = 0; i < ns; i++)
+					else
 					{
-						float R = 1.0f;
-						if (bb.comp.state == COMPSTATE::ATTACK)
+						// Calculate R
+						for (int i = 0; i < ns; i++)
 						{
-							// in ratio, AttackSamples
-							// ?       , StateSamples
-							R = (bb.comp.ratio - 1) * (AttackSamples - bb.comp.SamplesLeftforProgress) / AttackSamples;
-							R += 1;
-						}
-						if (bb.comp.state == COMPSTATE::ACTION || bb.comp.state == COMPSTATE::HOLD)
-							R = bb.comp.ratio;
-						if (bb.comp.state == COMPSTATE::RELEASE)
-						{
-							R = (bb.comp.ratio - 1) * (bb.comp.SamplesLeftforProgress) / ReleaseSamples;
-							R += 1;
-						}
+							float R = 1.0f;
+							if (bb.comp.state == COMPSTATE::ATTACK)
+							{
+								// in ratio, AttackSamples
+								// ?       , StateSamples
+								R = (bb.comp.ratio - 1) * (AttackSamples - bb.comp.SamplesLeftforProgress) / AttackSamples;
+								R += 1;
+							}
+							if (bb.comp.state == COMPSTATE::ACTION || bb.comp.state == COMPSTATE::HOLD)
+								R = bb.comp.ratio;
+							if (bb.comp.state == COMPSTATE::RELEASE)
+							{
+								R = (bb.comp.ratio - 1) * (bb.comp.SamplesLeftforProgress) / ReleaseSamples;
+								R += 1;
+							}
 
-						// For drawing
-						if (bb.comp.Mode == COMPMODE::COMPRESSOR)
-						{
-							float diff = bb.comp.threshold - bb.LastInputDB;
-							diff *= R;
-							float db2 = bb.comp.threshold - diff;
-							bb.LastInputDBC = db2;
-						}
+							// For drawing
+							if (bb.comp.Mode == COMPMODE::COMPRESSOR)
+							{
+								float diff = bb.comp.threshold - bb.LastInputDB;
+								diff *= R;
+								float db2 = bb.comp.threshold - diff;
+								bb.LastInputDBC = db2;
+							}
 
-						if (bb.comp.Mode == COMPMODE::DEXPANDER || (bb.comp.Mode == COMPMODE::UDEXPANDER && db < bb.comp.threshold))
-						{
-							auto fax = d[i];
-							float diff = bb.comp.threshold - db;
-							diff *= R;
-							float db2 = bb.comp.threshold - diff;
-							auto f1 = db2lin(db);
-							auto f2 = db2lin(db2);
-							float VV = f2 / f1;
-							fax *= VV;
-							o[i] = fax;
-						}
-						else
-							if (bb.comp.Mode == COMPMODE::UEXPANDER || (bb.comp.Mode == COMPMODE::UDEXPANDER && db > bb.comp.threshold))
+							if (bb.comp.Mode == COMPMODE::DEXPANDER || (bb.comp.Mode == COMPMODE::UDEXPANDER && db < bb.comp.threshold))
 							{
 								auto fax = d[i];
-								float diff = db - bb.comp.threshold;
+								float diff = bb.comp.threshold - db;
 								diff *= R;
-								float db2 = bb.comp.threshold + diff;
+								float db2 = bb.comp.threshold - diff;
 								auto f1 = db2lin(db);
 								auto f2 = db2lin(db2);
 								float VV = f2 / f1;
@@ -1796,11 +1954,11 @@ public:
 								o[i] = fax;
 							}
 							else
-								if (bb.comp.Mode == COMPMODE::COMPRESSOR)
+								if (bb.comp.Mode == COMPMODE::UEXPANDER || (bb.comp.Mode == COMPMODE::UDEXPANDER && db > bb.comp.threshold))
 								{
 									auto fax = d[i];
 									float diff = db - bb.comp.threshold;
-									diff /= R;
+									diff *= R;
 									float db2 = bb.comp.threshold + diff;
 									auto f1 = db2lin(db);
 									auto f2 = db2lin(db2);
@@ -1808,47 +1966,61 @@ public:
 									fax *= VV;
 									o[i] = fax;
 								}
-
-						if (bb.comp.makeup)
-						{
-							auto dbc = lin2db(fabs(o[i]));
-							dbc += bb.comp.makeup;
-							if (o[i] < 0)
-								o[i] = -db2lin(dbc);
-							else
-								o[i] = db2lin(dbc);
-						}
-
-
-						bb.comp.SamplesLeftforProgress--;
-						if (bb.comp.SamplesLeftforProgress == 0)
-						{
-							if (bb.comp.state == COMPSTATE::HOLD)
-							{
-								bb.comp.state = COMPSTATE::RELEASE;
-								bb.comp.SamplesLeftforProgress = ReleaseSamples;
-							}
-							else
-								if (bb.comp.state == COMPSTATE::RELEASE)
-									bb.comp.state = COMPSTATE::NONE;
 								else
-									if (bb.comp.state == COMPSTATE::ATTACK)
-										bb.comp.state = COMPSTATE::ACTION;
+									if (bb.comp.Mode == COMPMODE::COMPRESSOR)
+									{
+										auto fax = d[i];
+										float diff = db - bb.comp.threshold;
+										diff /= R;
+										float db2 = bb.comp.threshold + diff;
+										auto f1 = db2lin(db);
+										auto f2 = db2lin(db2);
+										float VV = f2 / f1;
+										fax *= VV;
+										o[i] = fax;
+									}
+
+							if (bb.comp.makeup)
+							{
+								auto dbc = lin2db(fabs(o[i]));
+								dbc += bb.comp.makeup;
+								if (o[i] < 0)
+									o[i] = -db2lin(dbc);
+								else
+									o[i] = db2lin(dbc);
+							}
+
+
+							bb.comp.SamplesLeftforProgress--;
+							if (bb.comp.SamplesLeftforProgress == 0)
+							{
+								if (bb.comp.state == COMPSTATE::HOLD)
+								{
+									bb.comp.state = COMPSTATE::RELEASE;
+									bb.comp.SamplesLeftforProgress = ReleaseSamples;
+								}
+								else
+									if (bb.comp.state == COMPSTATE::RELEASE)
+										bb.comp.state = COMPSTATE::NONE;
+									else
+										if (bb.comp.state == COMPSTATE::ATTACK)
+											bb.comp.state = COMPSTATE::ACTION;
+							}
 						}
-					}
-					if (bb.comp.AutoDeclipper)
-					{
-						float vm = 0;
-						for (int fi = 0; fi < ns; fi++)
+						if (bb.comp.AutoDeclipper)
 						{
-							auto fb = fabs(o[fi]);
-							if (fb > vm)
-								vm = fb;
-						}
-						if (vm > 1.0f)
-						{
+							float vm = 0;
 							for (int fi = 0; fi < ns; fi++)
-								o[fi] /= vm;
+							{
+								auto fb = fabs(o[fi]);
+								if (fb > vm)
+									vm = fb;
+							}
+							if (vm > 1.0f)
+							{
+								for (int fi = 0; fi < ns; fi++)
+									o[fi] /= vm;
+							}
 						}
 					}
 				}
@@ -1857,22 +2029,24 @@ public:
 
 		if (M)
 		{
-			for (int i = 0; i < ns; i++)
+			for (int ich = 0; ich < nch; ich++)
 			{
-				output[i] = 0;
-				for (auto& bb : b)
-					output[i] += bb.out[i];
-
-				if (globalmakeup)
+				auto output = outputs[ich];
+				for (int i = 0; i < ns; i++)
 				{
-					auto dbc = lin2db(fabs(output[i]));
-					dbc += globalmakeup;
-					if (output[i] < 0)
-						output[i] = -db2lin(dbc);
-					else
-						output[i] = db2lin(dbc);
+					output[i] = 0;
+					for (auto& bb : b)
+						output[i] += bb.dout[ich][i];
+					if (globalmakeup)
+					{
+						auto dbc = lin2db(fabs(output[i]));
+						dbc += globalmakeup;
+						if (output[i] < 0)
+							output[i] = -db2lin(dbc);
+						else
+							output[i] = db2lin(dbc);
+					}
 				}
-
 			}
 		}
 	}
@@ -2589,7 +2763,7 @@ inline void MMCB::Dirty(COMP* q, bool)
 {
 	if (!q)
 		return;
-	q->Build(q->TheSR, 0);
+	q->Build(q->TheSR, 0,1);
 }
 
 
