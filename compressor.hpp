@@ -439,6 +439,8 @@ public:
 	{
 		e.RemoveAllElements();
 		e.vv("lm").SetValueInt(fmodelog);
+		e.vv("ds").SetValueInt(DataSize);
+		e.vv("sdm").SetValueInt(ShowDataMode);
 		if (globalmakeup > 0)
 			e.vv("gmakeup").SetValueFloat(globalmakeup);
 		wchar_t re[100] = {};
@@ -473,6 +475,9 @@ public:
 		Chains.clear();
 		globalmakeup = e.vv("gmakeup").GetValueFloat(0);
 		fmodelog = e.vv("lm").GetValueInt(0);
+		DataSize = e.vv("ds").GetValueInt(100);
+		ShowDataMode = e.vv("sdm").GetValueInt();
+
 		for (auto& els : e["bands"])
 		{
 			COMPBAND cb;
@@ -855,6 +860,21 @@ public:
 		if (ChainHit(ww, ll))
 			return;
 
+
+		if (ShowDataMode > 0)
+		{
+			D2D1_RECT_F r = rc;
+			r.top = rc.bottom - 2;
+			r.bottom = r.top + 4;
+			if (InRect<>(r, x, y))
+			{
+				SetCursor(ResizeCursorNS);
+				ChangingDataSize = 1;
+				return;
+			}
+		}
+
+
 		// chain threshold
 		for (auto& ch : Chains)
 		{
@@ -1139,10 +1159,21 @@ public:
 
 		if (LeftClick)
 		{
+			if (ChangingDataSize)
+			{
+				RECT rc3 = {};
+				GetClientRect(PaintWindow, &rc3);
+				DataSize =(int)(rc3.bottom - y);
+				SetCursor(ResizeCursorNS);
+				Redraw();
+				return;
+			}
 			if (ChangingChainThreshold)
 			{
 				SetCursor(ResizeCursorNS);
 				ChangingChainThreshold->thr = V2DB(Y2V(y));
+				if (ChangingChainThreshold->thr < -96)
+					ChangingChainThreshold->thr = -96;
 				Redraw();
 				return;
 			}
@@ -1151,6 +1182,8 @@ public:
 			{
 				SetCursor(ResizeCursorNS);
 				ChangingThreshold->comp.threshold = V2DB(Y2V(y));
+				if (ChangingThreshold->comp.threshold < -96)
+					ChangingThreshold->comp.threshold = -96;
 				ChangingThreshold->comp.hysteresis = ChangingThreshold->comp.threshold - 3;
 				Redraw();
 				return;
@@ -1204,6 +1237,19 @@ public:
 				ChangingRight->to = nhz / (float)MaxHz;
 				ChangingLeft->from = nhz / (float)MaxHz;
 				reset();
+				Redraw();
+				return;
+			}
+		}
+
+		if (ShowDataMode > 0)
+		{
+			D2D1_RECT_F r = rc;
+			r.top = rc.bottom - 2;
+			r.bottom = r.top + 4;
+			if (InRect<>(r, x, y))
+			{
+				SetCursor(ResizeCursorNS);
 				Redraw();
 				return;
 			}
@@ -1278,6 +1324,7 @@ public:
 
 	virtual void LeftUp(WPARAM ww, LPARAM ll)
 	{
+		ChangingDataSize = 0;
 		ChangingChainThreshold = 0;
 		ChangingThreshold = 0;
 		ChangingHysteresis = 0;
@@ -2164,6 +2211,8 @@ public:
 	float V2DB(float V, bool NeedNZ = 0)
 	{
 		float dBX = 0;
+		if (V > 1.0f)
+			return -96;
 		dBX = PercentTodBFS((1.0f - V) * 100.0f);
 		return dBX;
 	}
@@ -2538,6 +2587,8 @@ public:
 			{
 				ns--;
 			}
+			while (ns > 4096)
+				ns /= 2;
 		}
 
 		if (Mode == 1)
@@ -2621,7 +2672,7 @@ public:
 
 					s /= (float)(ns * 2);
 
-					s *= 12.0f;
+					s *= 120.0f;
 					s = fabs(s);
 					S += s;
 				}
@@ -2633,13 +2684,15 @@ public:
 
 	}
 
+	bool ChangingDataSize = 0;
+	int DataSize = 100;
 	virtual void Paint(ID2D1Factory* fact, ID2D1RenderTarget* r, RECT rrc)
 	{
 		r->Clear();
 		rc = FromR(rrc);
 		auto rfull = rc;
 		if (ShowDataMode > 0)
-			rc.bottom -= 100;
+			rc.bottom -= DataSize;
 		std::lock_guard<std::recursive_mutex> lg(mu);
 		wchar_t t[1000] = { 0 };
 		CreateBrushes(r);
@@ -2978,19 +3031,36 @@ public:
 		}
 
 		// Paint the wave
-		if (dins.size() > 0 && ShowDataMode > 0)
+		if (dins.size() > 0 && douts.size() > 0 && ShowDataMode > 0)
 		{
-			auto& din = dins[0];
-			auto& dout = douts[0];
 			D2D1_RECT_F rc2 = rfull;
-			rc2.top = rc2.bottom - 100;
-			rc2.bottom -= 50;
+			rc2.top = rc2.bottom - DataSize;
+			rc2.bottom = rc2.top + DataSize/2.0f;
 			CComPtr<ID2D1Factory> fat;
 			r->GetFactory(&fat);
-			DrawWave(fat, r, rc2, 0, YellowBrush, 0, din.data(), (int)din.size(), ShowDataMode - 1);
+
 			D2D1_RECT_F rc2a = rfull;
-			rc2a.top = rc2a.bottom - 50;
-			DrawWave(fat, r, rc2a, 0, SelectBrush, 0, dout.data(), (int)dout.size(), ShowDataMode - 1);
+			rc2a.top = rc2a.bottom - DataSize / 2;
+
+			for (size_t i = 0; i < dins.size() && i < douts.size(); i++)
+			{
+				auto& din = dins[i];
+				auto& dout = douts[i];
+
+				auto rcx = rc2;
+				float he = rc2.bottom - rc2.top;
+				he /= dins.size();
+				rcx.top = rc2.top + (i * he);
+				rcx.bottom = rcx.top + he;
+				DrawWave(fat, r, rcx, 0, YellowBrush, 0, din.data(), (int)din.size(), ShowDataMode - 1);
+
+				rcx = rc2a;
+				he = rc2a.bottom - rc2a.top;
+				he /= douts.size();
+				rcx.top = rc2a.top + (i * he);
+				rcx.bottom = rcx.top + he;
+				DrawWave(fat, r, rcx, 0, SelectBrush, 0, dout.data(), (int)dout.size(), ShowDataMode - 1);
+			}
 		}
 
 	}
