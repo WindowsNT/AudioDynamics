@@ -9,6 +9,8 @@
 #else
 #include "f:\TP2\\EQ\\alldspfilters.hpp"
 void nop() {}
+#define shared_ptr_debug shared_ptr
+#define make_shared_debug make_shared
 #endif
 
 
@@ -143,7 +145,7 @@ struct COMPBAND
 	D2D1_RECT_F ButtRelease = {};
 	D2D1_RECT_F ButtMakeup = {};
 
-	std::shared_ptr<void> sf;
+	std::shared_ptr_debug<void> sf;
 	std::vector<float> in;
 	std::vector<float> out;
 	COMPPARAMS comp;
@@ -158,6 +160,12 @@ public:
 	virtual void RedrawRequest(COMP* pr) = 0;
 	virtual void Dirty(COMP* e, bool) = 0;
 
+#ifdef ENABLE_SHARED_PTR_DEBUG
+	virtual ~COMPCALLBACK()
+	{
+	}
+#endif
+
 };
 
 class MMCB : public COMPCALLBACK
@@ -168,6 +176,13 @@ public:
 
 	virtual void RedrawRequest(COMP* p);
 	virtual void Dirty(COMP* q, bool);
+
+#ifdef ENABLE_SHARED_PTR_DEBUG
+	virtual ~MMCB()
+	{
+	}
+#endif
+
 };
 
 struct COMPCHAIN
@@ -189,7 +204,7 @@ class COMP
 	std::vector<COMPCHAIN> Chains;
 
 
-	std::vector<std::shared_ptr<COMPCALLBACK>> cbs;
+	std::vector<std::shared_ptr_debug<COMPCALLBACK>> cbs;
 	std::recursive_mutex mu;
 	D2D1_RECT_F rc = {};
 	CComPtr<IDWriteFactory> WriteFactory;
@@ -409,7 +424,7 @@ public:
 	{
 		cbs.clear();
 	}
-	void AddCallback(std::shared_ptr<COMPCALLBACK> cx)
+	void AddCallback(std::shared_ptr_debug<COMPCALLBACK> cx)
 	{
 		cbs.push_back(cx);
 	}
@@ -1272,30 +1287,30 @@ public:
 			{
 				// Low pass
 				double fr = bb.to * MaxHz;
-				std::shared_ptr<void>& sf = bb.sf;
+				std::shared_ptr_debug<void>& sf = bb.sf;
 				if (!sf)
 				{
 					if (bb.Type == 0)
 					{
-						auto sf2 = std::make_shared<ButtLP>();
+						auto sf2 = std::make_shared_debug<ButtLP>();
 						sf2->setup(bb.Order, SR, fr);
 						sf = sf2;
 					}
 					if (bb.Type == 1)
 					{
-						auto sf2 = std::make_shared<Che1LP>();
+						auto sf2 = std::make_shared_debug<Che1LP>();
 						sf2->setup(bb.Order, SR, fr, bb.ripple);
 						sf = sf2;
 					}
 					if (bb.Type == 2)
 					{
-						auto sf2 = std::make_shared<Che2LP>();
+						auto sf2 = std::make_shared_debug<Che2LP>();
 						sf2->setup(bb.Order, SR, fr, bb.ripple);
 						sf = sf2;
 					}
 					if (bb.Type == 3)
 					{
-						auto sf2 = std::make_shared<EllLP>();
+						auto sf2 = std::make_shared_debug<EllLP>();
 						sf2->setup(bb.Order, SR, fr, bb.ripple, bb.rolloff);
 						sf = sf2;
 					}
@@ -1306,30 +1321,30 @@ public:
 				{
 					// High pass
 					double fr = bb.from * MaxHz;
-					std::shared_ptr<void>& sf = bb.sf;
+					std::shared_ptr_debug<void>& sf = bb.sf;
 					if (!sf)
 					{
 						if (bb.Type == 0)
 						{
-							auto sf2 = std::make_shared<ButtHP>();
+							auto sf2 = std::make_shared_debug<ButtHP>();
 							sf2->setup(bb.Order, SR, fr);
 							sf = sf2;
 						}
 						if (bb.Type == 1)
 						{
-							auto sf2 = std::make_shared<Che1HP>();
+							auto sf2 = std::make_shared_debug<Che1HP>();
 							sf2->setup(bb.Order, SR, fr, bb.ripple);
 							sf = sf2;
 						}
 						if (bb.Type == 2)
 						{
-							auto sf2 = std::make_shared<Che2HP>();
+							auto sf2 = std::make_shared_debug<Che2HP>();
 							sf2->setup(bb.Order, SR, fr, bb.ripple);
 							sf = sf2;
 						}
 						if (bb.Type == 3)
 						{
-							auto sf2 = std::make_shared<EllHP>();
+							auto sf2 = std::make_shared_debug<EllHP>();
 							sf2->setup(bb.Order, SR, fr, bb.ripple, bb.rolloff);
 							sf = sf2;
 						}
@@ -1340,30 +1355,30 @@ public:
 					// Bandpass filter
 					double fr1 = bb.from * MaxHz;
 					double fr2 = bb.to * MaxHz;
-					std::shared_ptr<void>& sf = bb.sf;
+					std::shared_ptr_debug<void>& sf = bb.sf;
 					if (!sf)
 					{
 						if (bb.Type == 0)
 						{
-							auto sf2 = std::make_shared<ButtBP>();
+							auto sf2 = std::make_shared_debug<ButtBP>();
 							sf2->setup(bb.Order, SR, fr1 + (fr2 - fr1) / 2.0, (fr2 - fr1) / 2.0);
 							sf = sf2;
 						}
 						if (bb.Type == 1)
 						{
-							auto sf2 = std::make_shared<Che1BP>();
+							auto sf2 = std::make_shared_debug<Che1BP>();
 							sf2->setup(bb.Order, SR, fr1 + (fr2 - fr1) / 2.0, (fr2 - fr1) / 2.0, bb.ripple);
 							sf = sf2;
 						}
 						if (bb.Type == 2)
 						{
-							auto sf2 = std::make_shared<Che2BP>();
+							auto sf2 = std::make_shared_debug<Che2BP>();
 							sf2->setup(bb.Order, SR, fr1 + (fr2 - fr1) / 2.0, (fr2 - fr1) / 2.0, bb.ripple);
 							sf = sf2;
 						}
 						if (bb.Type == 3)
 						{
-							auto sf2 = std::make_shared<EllBP>();
+							auto sf2 = std::make_shared_debug<EllBP>();
 							sf2->setup(bb.Order, SR, fr1 + (fr2 - fr1) / 2.0, (fr2 - fr1) / 2.0, bb.ripple, bb.rolloff);
 							sf = sf2;
 						}
@@ -1455,25 +1470,25 @@ public:
 				{
 					if (bb.Type == 0)
 					{
-						std::shared_ptr<ButtLP> fx;
+						std::shared_ptr_debug<ButtLP> fx;
 						fx = std::static_pointer_cast<ButtLP>(bb.sf);
 						fx->process(ns, &d);
 					}
 					if (bb.Type == 1)
 					{
-						std::shared_ptr<Che1LP> fx;
+						std::shared_ptr_debug<Che1LP> fx;
 						fx = std::static_pointer_cast<Che1LP>(bb.sf);
 						fx->process(ns, &d);
 					}
 					if (bb.Type == 2)
 					{
-						std::shared_ptr<Che2LP> fx;
+						std::shared_ptr_debug<Che2LP> fx;
 						fx = std::static_pointer_cast<Che2LP>(bb.sf);
 						fx->process(ns, &d);
 					}
 					if (bb.Type == 3)
 					{
-						std::shared_ptr<EllLP> fx;
+						std::shared_ptr_debug<EllLP> fx;
 						fx = std::static_pointer_cast<EllLP>(bb.sf);
 						fx->process(ns, &d);
 					}
@@ -1483,25 +1498,25 @@ public:
 					{
 						if (bb.Type == 0)
 						{
-							std::shared_ptr<ButtHP> fx;
+							std::shared_ptr_debug<ButtHP> fx;
 							fx = std::static_pointer_cast<ButtHP>(bb.sf);
 							fx->process(ns, &d);
 						}
 						if (bb.Type == 1)
 						{
-							std::shared_ptr<Che1HP> fx;
+							std::shared_ptr_debug<Che1HP> fx;
 							fx = std::static_pointer_cast<Che1HP>(bb.sf);
 							fx->process(ns, &d);
 						}
 						if (bb.Type == 2)
 						{
-							std::shared_ptr<Che2HP> fx;
+							std::shared_ptr_debug<Che2HP> fx;
 							fx = std::static_pointer_cast<Che2HP>(bb.sf);
 							fx->process(ns, &d);
 						}
 						if (bb.Type == 3)
 						{
-							std::shared_ptr<EllHP> fx;
+							std::shared_ptr_debug<EllHP> fx;
 							fx = std::static_pointer_cast<EllHP>(bb.sf);
 							fx->process(ns, &d);
 						}
@@ -1510,25 +1525,25 @@ public:
 					{
 						if (bb.Type == 0)
 						{
-							std::shared_ptr<ButtBP> fx;
+							std::shared_ptr_debug<ButtBP> fx;
 							fx = std::static_pointer_cast<ButtBP>(bb.sf);
 							fx->process(ns, &d);
 						}
 						if (bb.Type == 1)
 						{
-							std::shared_ptr<Che1BP> fx;
+							std::shared_ptr_debug<Che1BP> fx;
 							fx = std::static_pointer_cast<Che1BP>(bb.sf);
 							fx->process(ns, &d);
 						}
 						if (bb.Type == 2)
 						{
-							std::shared_ptr<Che2BP> fx;
+							std::shared_ptr_debug<Che2BP> fx;
 							fx = std::static_pointer_cast<Che2BP>(bb.sf);
 							fx->process(ns, &d);
 						}
 						if (bb.Type == 3)
 						{
-							std::shared_ptr<EllBP> fx;
+							std::shared_ptr_debug<EllBP> fx;
 							fx = std::static_pointer_cast<EllBP>(bb.sf);
 							fx->process(ns, &d);
 						}
@@ -1723,7 +1738,7 @@ public:
 
 				if (bb.comp.state == COMPSTATE::NONE && !M)
 				{
-					memcpy(d, o, ns * sizeof(float));
+					memcpy(o, d, ns * sizeof(float));
 				}
 				else
 				{
@@ -2010,7 +2025,7 @@ public:
 
 
 					c->SetWindow(hh);
-					auto mmd = std::make_shared<MMCB>();
+					auto mmd = std::make_shared_debug<MMCB>();
 					mmd->hC = hh;
 					mmd->SR = z->SR;
 					c->AddCallback(mmd);
