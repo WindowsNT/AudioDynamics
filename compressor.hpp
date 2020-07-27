@@ -1,13 +1,8 @@
 #ifdef TURBO_PLAY
-
 #include "..\\\AED\\\fft.hpp"
-#include "..\\fft-real-master\\\FFTReal.h"
-#include "..\\DSPFilters\\DSPFilters\\include\\DspFilters\\Elliptic.h"
-#include "..\\DSPFilters\\DSPFilters\\include\\DspFilters\\ChebyshevII.h"
-#include "..\\DSPFilters\\DSPFilters\\include\\DspFilters\\ChebyshevI.h"
-#include "..\\DSPFilters\\DSPFilters\\include\\DspFilters\\Butterworth.h"
 #else
-#include ".\\eq\alldspfilters.hpp"
+#include ".\\eq\alldspfilters_h.hpp"
+#include ".\\eq\fft.hpp"
 void nop() {}
 #define shared_ptr_debug shared_ptr
 #define make_shared_debug make_shared
@@ -210,6 +205,9 @@ class COMP
 	float LastInputDBChain = -72;
 	std::vector<COMPCHAIN> Chains;
 
+	std::vector<std::vector<float>> dins;
+	std::vector<std::vector<float>> douts;
+	int ShowDataMode = 0;
 
 	std::vector<std::shared_ptr_debug<COMPCALLBACK>> cbs;
 	std::recursive_mutex mu;
@@ -417,6 +415,7 @@ class COMP
 
 public:
 
+	HWND PaintWindow = 0;
 	std::vector<COMPCHAIN>& GetChains() { return  Chains; };
 
 	std::vector<COMPBAND>& GetBands() { return b; }
@@ -634,6 +633,12 @@ public:
 					AppendMenu(hPr, MF_STRING, 83, L"Global makeup gain...");
 				}
 				AppendMenu(hPr, MF_SEPARATOR, 0, L"");
+				AppendMenu(hPr, MF_STRING, 141, L"Live data off");
+				AppendMenu(hPr, MF_STRING, 142, L"Live data signal");
+				AppendMenu(hPr, MF_STRING, 143, L"Live data FFT");
+				CheckMenuItem(hPr, ShowDataMode + 141, MF_CHECKED);
+
+				AppendMenu(hPr, MF_SEPARATOR, 0, L"");
 				AppendMenu(hPr, MF_STRING, 101, L"Save preset...");
 				AppendMenu(hPr, MF_STRING, 102, L"Load preset...");
 
@@ -661,6 +666,13 @@ public:
 				DestroyMenu(hPr);
 				if (tcmd == 0)
 					return;
+
+				if (tcmd == 141)
+					ShowDataMode = 0;
+				if (tcmd == 142)
+					ShowDataMode = 1;
+				if (tcmd == 143)
+					ShowDataMode = 2;
 
 
 				if (tcmd == 101)
@@ -1444,6 +1456,30 @@ public:
 		if (!Single())
 			M = true;
 
+
+		if (ShowDataMode > 0 && IsWindow(PaintWindow))
+		{
+			std::lock_guard<std::recursive_mutex> lg(mu);
+			dins.resize(nch);
+			int NeedSamples = SR * 4;
+			for (int i = 0; i < nch; i++)
+			{
+				auto& din = dins[i];
+				auto sz = din.size();
+				if (sz <= NeedSamples)
+					din.resize(NeedSamples);
+				sz = din.size();
+				din.resize(sz + ns);
+				memcpy(din.data() + sz, inputs[i], ns * sizeof(float));
+				if (din.size() > NeedSamples)
+				{
+					auto rd = din.size() - NeedSamples;
+					din.erase(din.begin(), din.begin() + rd);
+					sz = din.size();
+				}
+			}
+		}
+
 		//* triggering
 		bool Trigger = 0;
 		if (!chainin)
@@ -2049,6 +2085,29 @@ public:
 				}
 			}
 		}
+
+		if (ShowDataMode > 0 && IsWindow(PaintWindow))
+		{
+			std::lock_guard<std::recursive_mutex> lg(mu);
+			douts.resize(nch);
+			int NeedSamples = SR * 4;
+			for (int i = 0; i < nch; i++)
+			{
+				auto& din = douts[i];
+				auto sz = din.size();
+				if (sz <= NeedSamples)
+					din.resize(NeedSamples);
+				sz = din.size();
+				din.resize(sz + ns);
+				memcpy(din.data() + sz, outputs[i], ns * sizeof(float));
+				if (din.size() > NeedSamples)
+				{
+					auto rd = din.size() - NeedSamples;
+					din.erase(din.begin(), din.begin() + rd);
+				}
+			}
+		}
+
 	}
 
 	float dBFSToPercent(float dBFS = 0)
@@ -2273,6 +2332,7 @@ public:
 						z->fa->CreateHwndRenderTarget(D2D1::RenderTargetProperties(), D2D1::HwndRenderTargetProperties(hh, D2D1::SizeU(rc.right - rc.left, rc.bottom - rc.top)), &z->d);
 					}
 					z->d->BeginDraw();
+					z->c->PaintWindow = hh;
 					z->c->Paint(z->fa, z->d, rc);
 					[[maybe_unused]] auto hr = z->d->EndDraw();
 					EndPaint(hh, &ps);
@@ -2416,12 +2476,173 @@ public:
 		return t;
 	}
 
+	QuickFFT2<float> f4;
+	std::vector<D2D1_POINT_2F> ptsX;
+
+	inline void FillPolygon(ID2D1Factory* f, ID2D1RenderTarget* r, D2D1_POINT_2F* p, size_t num, ID2D1Brush* b, FLOAT szx, bool Close)
+	{
+		// Convert POINT to D2D1_POINT_2F
+		if (!p || !num)
+			return;
+
+
+		CComPtr<ID2D1PathGeometry> pg = 0;
+		CComPtr<ID2D1GeometrySink> pgs = 0;
+		f->CreatePathGeometry(&pg);
+		if (pg)
+		{
+			pg->Open(&pgs);
+			if (pgs)
+			{
+				D2D1_POINT_2F fb;
+				fb.x = (FLOAT)p[0].x;
+				fb.y = (FLOAT)p[0].y;
+				// Use D2D1_FIGURE_BEGIN_FILLED for filled
+				D2D1_FIGURE_BEGIN fg = D2D1_FIGURE_BEGIN_HOLLOW;
+				if (szx == 0)
+					fg = D2D1_FIGURE_BEGIN_FILLED;
+				D2D1_FIGURE_END fe;
+				if (Close)
+					fe = D2D1_FIGURE_END_CLOSED;
+				else
+					fe = D2D1_FIGURE_END_OPEN;
+				pgs->BeginFigure(fb, fg);
+				for (size_t i = 1; i < num; i++)
+				{
+					D2D1_POINT_2F& a = p[i];
+					if (&a == &p[0])
+						continue;
+					D2D1_POINT_2F fu;
+					fu.x = a.x;
+					fu.y = a.y;
+					pgs->AddLine(fu);
+				}
+				pgs->EndFigure(fe);
+				pgs->Close();
+			}
+			if (szx > 0)
+				r->DrawGeometry(pg, b, szx);
+			else
+				r->FillGeometry(pg, b);
+		}
+	}
+
+	inline void DrawWave(ID2D1Factory* f, ID2D1RenderTarget* r, D2D1_RECT_F& rc, ID2D1SolidColorBrush* bg, ID2D1SolidColorBrush* fg, ID2D1SolidColorBrush* redw, float* smp, int ns, int Mode)
+	{
+		if (ns == 0 || smp == 0)
+			return;
+
+		if (Mode == 1)
+		{
+			while (ns > 0 && (ns & (ns - 1)) != 0)
+			{
+				ns--;
+			}
+		}
+
+		if (Mode == 1)
+		{
+			f4.Prepare(smp, ns);
+			smp = f4.Transform();
+			ns /= 2; // take only half part
+		}
+
+		if (bg)
+			r->FillRectangle(rc, bg);
+
+		if (Mode == 0)
+		{
+			ptsX.clear();
+			bool R = false;
+			float MaxA = 0;
+			auto mw = rc.right - rc.left;
+			if (mw == 0)
+				return;
+			int step = (int)(ns / mw);
+			for (int i = 0; i < ns; i += step)
+			{
+				D2D1_POINT_2F pp;
+
+				// In ns, rc.right
+				// in i,   ?
+				pp.x = ((rc.right - rc.left) * i) / (float)ns;
+				pp.x += rc.left;
+
+				float s = smp[i];
+				auto fs = fabs(s);
+				if (fs > MaxA)
+					MaxA = fs;
+				if (MaxA > 1.0f)
+				{
+
+				}
+				if (Mode == 0)
+					s += 1.0f;
+				s /= 2.0f;
+
+				// In rc.bottom, 1.0f
+				// ?             s
+				pp.y = (rc.bottom - rc.top) * s;
+				pp.y += rc.top;
+				if (pp.y > rc.bottom)
+				{
+					pp.y = rc.bottom;
+					R = true;
+				}
+				if (pp.y < rc.top)
+				{
+					pp.y = rc.top;
+					R = true;
+				}
+				ptsX.push_back(pp);
+			}
+			FillPolygon(f, r, ptsX.data(), ptsX.size(), R ? redw : fg, 1, 0);
+		}
+		if (Mode == 1)
+		{
+			int Bars = 16;
+			int SamplesPerBar = ns / Bars;
+			float WidthPerBar = (rc.right - rc.left) / (float)Bars;
+			int e = 0;
+			for (int i = 0; i < Bars; i++)
+			{
+				D2D1_RECT_F rr = { 0 };
+				rr.left = rc.left + i * WidthPerBar + 1;
+				rr.right = rr.left + (WidthPerBar - 2);
+				rr.top = rc.top;
+				rr.bottom = rc.bottom;
+				float S = 0;
+				for (int h = 0; h < SamplesPerBar; h++)
+				{
+					if (e >= ns)
+						break;
+					float s = sqrt(smp[e] * smp[e] + smp[e + ns] * smp[e + ns]);
+					e++;
+
+					s /= (float)(ns * 2);
+
+					s *= 12.0f;
+					s = fabs(s);
+					S += s;
+				}
+				S /= (float)(SamplesPerBar);
+				rr.top = rc.top + (rc.bottom - rc.top) * (1.0f - S);
+				r->FillRectangle(rr, fg);
+			}
+		}
+
+	}
+
 	virtual void Paint(ID2D1Factory* fact, ID2D1RenderTarget* r, RECT rrc)
 	{
+		r->Clear();
+		rc = FromR(rrc);
+		auto rfull = rc;
+		if (ShowDataMode > 0)
+			rc.bottom -= 100;
 		std::lock_guard<std::recursive_mutex> lg(mu);
 		wchar_t t[1000] = { 0 };
 		CreateBrushes(r);
-		rc = FromR(rrc);
 		auto rr = rc;
 		r->FillRectangle(rc, BGBrush);
 
@@ -2755,6 +2976,23 @@ public:
 			r->FillRectangle(re, br);
 			br->SetColor(col);
 		}
+
+		// Paint the wave
+		if (dins.size() > 0 && ShowDataMode > 0)
+		{
+			auto& din = dins[0];
+			auto& dout = douts[0];
+			D2D1_RECT_F rc2 = rfull;
+			rc2.top = rc2.bottom - 100;
+			rc2.bottom -= 50;
+			CComPtr<ID2D1Factory> fat;
+			r->GetFactory(&fat);
+			DrawWave(fat, r, rc2, 0, YellowBrush, 0, din.data(), (int)din.size(), ShowDataMode - 1);
+			D2D1_RECT_F rc2a = rfull;
+			rc2a.top = rc2a.bottom - 50;
+			DrawWave(fat, r, rc2a, 0, SelectBrush, 0, dout.data(), (int)dout.size(), ShowDataMode - 1);
+		}
+
 	}
 
 };

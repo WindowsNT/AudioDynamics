@@ -2,6 +2,7 @@
 #include "xml\\xml3all.h"
 
 #include "compressor.hpp"
+#include ".\eq\\alldspfilters_c.cpp"
 
 
 
@@ -619,6 +620,7 @@ LRESULT CALLBACK Main_DP(HWND hh, UINT mm, WPARAM ww, LPARAM ll)
 				fa->CreateHwndRenderTarget(D2D1::RenderTargetProperties(), D2D1::HwndRenderTargetProperties(hh, D2D1::SizeU(rc.right - rc.left, rc.bottom - rc.top)), &d);
 			}
 			d->BeginDraw();
+			prx.PaintWindow = hh;
 			prx.Paint(fa, d, rc);
 			d->EndDraw();
 			EndPaint(hh, &ps);
