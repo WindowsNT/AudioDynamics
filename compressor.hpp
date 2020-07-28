@@ -9,20 +9,20 @@ void nop() {}
 #endif
 
 
-typedef Dsp::SimpleFilter<Dsp::Butterworth::LowPass<100>, 2> ButtLP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevI::LowPass<100>, 2> Che1LP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevII::LowPass<100>, 2> Che2LP;
-typedef Dsp::SimpleFilter<Dsp::Elliptic::LowPass<100>, 2> EllLP;
+typedef Dsp::SimpleFilter<Dsp::Butterworth::LowPass<100>, 10> ButtLP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevI::LowPass<100>, 10> Che1LP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevII::LowPass<100>, 10> Che2LP;
+typedef Dsp::SimpleFilter<Dsp::Elliptic::LowPass<100>, 10> EllLP;
 
-typedef Dsp::SimpleFilter<Dsp::Butterworth::HighPass<100>, 2> ButtHP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevI::HighPass<100>, 2> Che1HP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevII::HighPass<100>, 2> Che2HP;
-typedef Dsp::SimpleFilter<Dsp::Elliptic::HighPass<100>, 2> EllHP;
+typedef Dsp::SimpleFilter<Dsp::Butterworth::HighPass<100>, 10> ButtHP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevI::HighPass<100>, 10> Che1HP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevII::HighPass<100>, 10> Che2HP;
+typedef Dsp::SimpleFilter<Dsp::Elliptic::HighPass<100>, 10> EllHP;
 
-typedef Dsp::SimpleFilter<Dsp::Butterworth::BandPass<100>, 2> ButtBP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevI::BandPass<100>, 2> Che1BP;
-typedef Dsp::SimpleFilter<Dsp::ChebyshevII::BandPass<100>, 2> Che2BP;
-typedef Dsp::SimpleFilter<Dsp::Elliptic::BandPass<100>, 2> EllBP;
+typedef Dsp::SimpleFilter<Dsp::Butterworth::BandPass<100>, 10> ButtBP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevI::BandPass<100>, 10> Che1BP;
+typedef Dsp::SimpleFilter<Dsp::ChebyshevII::BandPass<100>, 10> Che2BP;
+typedef Dsp::SimpleFilter<Dsp::Elliptic::BandPass<100>, 10> EllBP;
 
 enum class COMPSTATE
 {
@@ -3036,11 +3036,10 @@ public:
 			D2D1_RECT_F rc2 = rfull;
 			rc2.top = rc2.bottom - DataSize;
 			rc2.bottom = rc2.top + DataSize/2.0f;
-			CComPtr<ID2D1Factory> fat;
-			r->GetFactory(&fat);
-
 			D2D1_RECT_F rc2a = rfull;
 			rc2a.top = rc2a.bottom - DataSize / 2;
+			CComPtr<ID2D1Factory> fat;
+			r->GetFactory(&fat);
 
 			for (size_t i = 0; i < dins.size() && i < douts.size(); i++)
 			{
@@ -3052,14 +3051,14 @@ public:
 				he /= dins.size();
 				rcx.top = rc2.top + (i * he);
 				rcx.bottom = rcx.top + he;
-				DrawWave(fat, r, rcx, 0, YellowBrush, 0, din.data(), (int)din.size(), ShowDataMode - 1);
+				DrawWave(fat, r, rcx, 0, YellowBrush, YellowBrush, din.data(), (int)din.size(), ShowDataMode - 1);
 
 				rcx = rc2a;
 				he = rc2a.bottom - rc2a.top;
 				he /= douts.size();
 				rcx.top = rc2a.top + (i * he);
 				rcx.bottom = rcx.top + he;
-				DrawWave(fat, r, rcx, 0, SelectBrush, 0, dout.data(), (int)dout.size(), ShowDataMode - 1);
+				DrawWave(fat, r, rcx, 0, SelectBrush, SelectBrush, dout.data(), (int)dout.size(), ShowDataMode - 1);
 			}
 		}
 

@@ -4,89 +4,121 @@
 #include "compressor.hpp"
 #include ".\eq\\alldspfilters_c.cpp"
 
-
-
-unsigned long GetNextMP3Frame(unsigned char* dat, unsigned int ds, int& st)
+#pragma comment(lib,"Mfplat.lib")
+#pragma comment(lib,"mfreadwrite.lib")
+#pragma comment(lib,"mfuuid.lib")
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+HRESULT ReadFileX(const wchar_t* f,std::function<HRESULT(int,float*,int,int,unsigned long long, unsigned long long)> foo)
 {
-	// Find a 0xFF with one with 3 
-	for (unsigned int i = st; i < (ds - 1); i++)
+	CComPtr<IMFSourceReader> pReader;
+	auto hr = MFCreateSourceReaderFromURL(f, 0, &pReader);
+	if (FAILED(hr)) return hr;
+	hr = pReader->SetStreamSelection(
+		(DWORD)MF_SOURCE_READER_ALL_STREAMS, FALSE);
+	if (FAILED(hr)) return hr;
+	hr = pReader->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
+	if (FAILED(hr)) return hr;
+
+	// Create a partial media type that specifies uncompressed PCM audio.
+	CComPtr<IMFMediaType> pPartialType;
+	hr = MFCreateMediaType(&pPartialType);
+	if (FAILED(hr)) return hr;
+	hr = pPartialType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+	if (FAILED(hr)) return hr;
+	hr = pPartialType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_Float);
+	if (FAILED(hr)) return hr;
+
+/*	int SR = 48000;
+	hr = pPartialType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, SR);
+	if (FAILED(hr)) return hr;
+*/
+	hr = pReader->SetCurrentMediaType(
+		(DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+		NULL, pPartialType);
+	if (FAILED(hr)) return hr;
+
+	// Get the complete uncompressed format.
+	CComPtr<IMFMediaType> pUncompressedAudioType;
+	hr = pReader->GetCurrentMediaType(
+		(DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+		&pUncompressedAudioType);
+	if (FAILED(hr)) return hr;
+
+	// Ensure the stream is selected.
+	hr = pReader->SetStreamSelection(
+		(DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+		TRUE);
+	if (FAILED(hr)) return hr;
+
+	// Number of channels
+	UINT32 nCh = 0;
+	hr = pUncompressedAudioType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &nCh);
+	if (FAILED(hr)) return hr;
+
+	UINT32 aSR = 0;
+	hr = pUncompressedAudioType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &aSR);
+	if (FAILED(hr)) return hr;
+
+	// determine size
+	PROPVARIANT var;
+	PropVariantInit(&var);
+	hr = pReader->GetPresentationAttribute(
+		(DWORD)MF_SOURCE_READER_MEDIASOURCE,
+		MF_PD_DURATION,
+		&var
+	);
+	unsigned long long Duration = 0;
+	if (SUCCEEDED(hr))
+		Duration = var.hVal.QuadPart;
+
+	foo(aSR, 0, 0, nCh,0,Duration);
+	while (true)
 	{
-		unsigned char d0 = dat[i];
-		unsigned char d1 = dat[i + 1];
-		//		unsigned char d2 = dat[i + 2];
-		//		unsigned char d3 = dat[i + 2];
-		if (d0 != 0xFF)
-			continue;
-		if ((d1 & 0xE0) != 0xE0)
-			continue;
-		int Ly = ((d1 >> 1) & 3);
+		DWORD dwFlags = 0;
+		CComPtr<IMFSample> pSample;
 
-		if (Ly != 1)
+		LONGLONG ts = 0;
+		// Read the next sample.
+		hr = pReader->ReadSample(
+			(DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+			0, NULL, &dwFlags, &ts, &pSample);
+
+		if (FAILED(hr)) break;
+		if (dwFlags & MF_SOURCE_READERF_ENDOFSTREAM)
+			break;
+
+		if (pSample == NULL)
 			continue;
 
-		st = i;
+		// Get a pointer to the audio data in the sample.
+		CComPtr<IMFMediaBuffer> pBuffer;
+		hr = pSample->ConvertToContiguousBuffer(&pBuffer);
 
-		unsigned int j = 0;
-		memcpy(&j, dat + i, 4);
-		return j;
+		if (FAILED(hr)) { break; }
+
+		BYTE* pAudioData = 0;
+		DWORD cbBuffer = 0;
+		hr = pBuffer->Lock(&pAudioData, NULL, &cbBuffer);
+
+		if (FAILED(hr)) { break; }
+
+		hr = foo(aSR,(float*)pAudioData,cbBuffer/sizeof(float)/nCh,nCh,ts,Duration);
+		pBuffer->Unlock();
+		pAudioData = NULL;
+
+		// This is an interleaved buffer
+//		std::vector<std::vector<float>> rr;
+//		InterleavedToSplit<float>((float*)pAudioData, cbBuffer / sizeof(float), nCh, rr);
+//		for (UINT32 i = 0; i < nCh; i++)
+//			AE::Write(hY[i], (char*)rr[i].data(), rr[i].size() * sizeof(float));
+
+		// Unlock the buffer.
+
+		if (FAILED(hr)) { break; }
 	}
-	return 0;
-}
-
-
-void ReadMP3Header(FILE* fp, int& sr, int& nCh)
-{
-	int CP = ftell(fp);
-	std::vector<unsigned char> dat(100000);
-	size_t ds = fread(dat.data(), 1, 100000, fp);
-	fseek(fp, CP, SEEK_SET);
-
-	if (ds == 0)
-		return;
-
-
-	int st = 0;
-
-	for (int jF = 0; jF < 1; jF++)
-	{
-		size_t hdr = GetNextMP3Frame(dat.data(), (unsigned int)ds, st);
-		if (hdr == 0)
-			break; // duh
-
-		// This is it
-//		DWORD a = dat[st];
-//		DWORD b = dat[st + 1];
-		DWORD c = dat[st + 2];
-		DWORD d = dat[st + 3];
-
-		st++; // To go to next
-
-
-		unsigned int SRT = (c & 0xC) >> 2;
-		switch (SRT)
-		{
-			case 0:
-				sr = 44100;
-				break;
-			case 1:
-				sr = 48000;
-				break;
-			case 2:
-				sr = 32000;
-				break;
-		}
-
-		unsigned int CHT = (d & 0xC0) >> 6;
-		switch (CHT)
-		{
-			case 3:
-				nCh = 1;
-				break;
-			default:
-				nCh = 2;
-				break;
-		}
-	}
+	return S_OK;
 
 }
 
@@ -95,12 +127,7 @@ bool Ending = true;
 using namespace std;
 #include "mt\\rw.hpp"
 #include "eq\\wave.h"
-#define MP3_BLOCK_SIZE 522
-CONV conv;
 std::shared_ptr<WOUT> wout;
-int SR = 48000;
-int BS = 100;
-int BR = 32;
 std::recursive_mutex mu;
 
 COMP prx;
@@ -108,7 +135,7 @@ COMP prx;
 // Voice Capture
 std::vector<std::vector<float>> CurrentVC;
 std::recursive_mutex CurrentVCm;
-int VC()
+int VC(int SR)
 {
 #define REFTIMES_PER_SEC  5000000
 #define REFTIMES_PER_MILLISEC  5000
@@ -239,178 +266,82 @@ int VC()
 }
 
 
-int nCh = 1;
+CONV conv;
 void StartMP3(std::wstring fi)
 {
-	using namespace std;
-	FILE* fp = 0;
-	_wfopen_s(&fp, fi.c_str(), L"rb");
-	if (!fp)
-		return;
-	ReadMP3Header(fp, SR, nCh);
-	if (!SR)
-		return;
-	BS = SR / 10;
-	BR = 32;
-
-	wout = 0;
-	wout = make_shared<WOUT>();
-	wout->Open(WAVE_MAPPER, SR, 16,nCh);
-
-	vector<char> ww(1000);
-	WAVEFORMATEX* w2 = (WAVEFORMATEX*)ww.data();
-	WAVEFORMATEX& w = *w2;
-	w.wFormatTag = WAVE_FORMAT_MPEGLAYER3;
-	//		SR = 44100;
-
-
-	w.cbSize = MPEGLAYER3_WFX_EXTRA_BYTES;
-	w.wFormatTag = WAVE_FORMAT_MPEGLAYER3;
-	w.nChannels = (WORD)nCh;
-	w.nAvgBytesPerSec = 128 * (1024 / 8);  // not really used but must be one of 64, 96, 112, 128, 160kbps
-	w.wBitsPerSample = 0;                  // MUST BE ZERO
-	w.nBlockAlign = 1;                     // MUST BE ONE
-	w.nSamplesPerSec = SR;              // 44.1kHz
-	MPEGLAYER3WAVEFORMAT* mp3format = (MPEGLAYER3WAVEFORMAT*)&w;
-	mp3format->fdwFlags = MPEGLAYER3_FLAG_PADDING_OFF;
-	mp3format->nBlockSize = MP3_BLOCK_SIZE;             // voodoo value #1
-	mp3format->nFramesPerBlock = 1;                     // MUST BE ONE
-	mp3format->nCodecDelay = 1393;                      // voodoo value #2
-	mp3format->wID = MPEGLAYER3_ID_MPEG;
-
-	// This is a raw stream, based on ACM, so start decompression
-	vector<char> e(1000);
-	WAVEFORMATEX* wDest = (WAVEFORMATEX*)e.data();
-	wDest->wFormatTag = WAVE_FORMAT_PCM;
-	wDest->nSamplesPerSec = w.nSamplesPerSec;
-	wDest->nChannels = (WORD)nCh;
-	wDest->wBitsPerSample = 16;
-	auto f = acmFormatSuggest(0, &w, wDest, 1000, ACM_FORMATSUGGESTF_NSAMPLESPERSEC | ACM_FORMATSUGGESTF_WFORMATTAG | ACM_FORMATSUGGESTF_NCHANNELS | ACM_FORMATSUGGESTF_WBITSPERSAMPLE);
-	if (f)
-		return;
-	SR = wDest->nSamplesPerSec;
-	BS = SR / 10;
-
-	HACMSTREAM has = 0;
-	f = acmStreamOpen(&has, 0, &w, wDest, 0, 0, 0, 0);
-	if (f)
-		return;
-
-	DWORD InputSize = 3145728;
-	InputSize = MP3_BLOCK_SIZE;//*2000;
-	InputSize *= 100;
-
-	DWORD OutputSize = 0;
-	acmStreamSize(has, InputSize, &OutputSize, ACM_STREAMSIZEF_SOURCE);
-
-	vector<char> in(InputSize + 1);
-	vector<char> out(OutputSize + 1);
-	ACMSTREAMHEADER ash = { 0 };
-	ash.cbStruct = sizeof(ash);
-	ash.pbSrc = (LPBYTE)in.data();
-	ash.cbSrcLength = InputSize;
-	ash.pbDst = (LPBYTE)out.data();
-	ash.cbDstLength = OutputSize;
-	f = acmStreamPrepareHeader(has, &ash, 0);
-
-	vector<char> dx;
-	size_t BytesRead = 0;
+	int sr = 0;
+	int nch = 0;
 	Ending = false;
-	if (true)
+
+	std::vector<char> dx;
+
+	auto foo = [&](int SR, float* d, int nfr, int nCh, unsigned long long at, unsigned long long dur) -> HRESULT
 	{
-		std::lock_guard<std::recursive_mutex> lg(mu);
-		prx.Build(SR,0,nCh);
-
-	}
-
-	std::thread t2(VC);
-	t2.detach();
-
-
-	for (;;)
-	{
-		size_t FBR = fread(in.data(), 1, InputSize, fp);
-		if (FBR == 0)
-			break;
-		BytesRead += FBR;
-		ash.cbSrcLength = (DWORD)FBR;
-		f = acmStreamConvert(has, &ash, 0);
-
-		if (ash.cbSrcLengthUsed != ash.cbSrcLength)
-			fseek(fp, (signed)(ash.cbSrcLengthUsed - ash.cbSrcLength), SEEK_CUR);
-
-		auto ds = dx.size();
-		dx.resize(ds + ash.cbDstLengthUsed);
-		memcpy(dx.data() + ds, out.data(), ash.cbDstLengthUsed);
-
-
-		for (;;)
+		if (sr == 0 || nch == 0)
 		{
-			if (dx.size() < (size_t)(BS * 2))
-				break;
+			sr = SR;
+			nch = nCh;
+			wout = 0;
+			wout = make_shared<WOUT>();
+			wout->Open(WAVE_MAPPER, SR, 16, nCh);
+			std::lock_guard<std::recursive_mutex> lg(mu);
+			prx.Build(SR, 0, nCh);
+			std::thread t2(VC,SR);
+			t2.detach();
 
-			if (Ending)
-				break;
-			// Convert
-			int fsz = BS;
-			vector<float> d2(fsz);
-			conv.f16t32((const short*)dx.data(), fsz, d2.data());
-
-			if (nCh == 1)
+		}
+		if (d && nfr)
+		{
+			int BS = 1000;
+			for (int ifr = 0; ifr < nfr; ifr += BS)
 			{
-				vector<float> de = d2;
-				float* fde = de.data();
-				float* fd2 = d2.data();
-				std::lock_guard<std::recursive_mutex> lg(mu);
-				if (prx.GetChains().size() == 1 && prx.GetChains()[0].A)
-				{
-					std::lock_guard<std::recursive_mutex> lg(CurrentVCm);
-					auto s = CurrentVC[0].size();
-					if (s >= fsz)
-					{
-						prx.process(SR, nCh,&fd2, fsz, &fde,&CurrentVC, 0);
-						CurrentVC[0].erase(CurrentVC[0].begin(), CurrentVC[0].begin() + fsz);
-					}
-					else
-					{
-						prx.process(SR, nCh,&fd2, fsz, &fde, 0, 0);
-					}
-				}
-				else
-					prx.process(SR, nCh, &fd2, fsz, &fde, 0, 0);
-				vector<short> d4(fsz * 2);
-				memcpy(d2.data(), de.data(), fsz * sizeof(float));
-				conv.f32t16(d2.data(), fsz, d4.data());
-				if (wout)
-					wout->Write((const char*)d4.data(), fsz * 2);
+				int lfr = nfr - ifr;
+				if (lfr > BS)
+					lfr = BS;
 
-			}
-			if (nCh == 2)
-			{
-				// d2 is interleaved
-				int bT = fsz / nCh;
-				std::vector<float*> bin(nCh);
-				std::vector<float*> bout(nCh);
+				std::array<float*,100> bin;
+				std::array<float*,100> bout;
 				std::vector<std::vector<float>> xin(nCh);
 				std::vector<std::vector<float>> xout(nCh);
 				for (int i = 0; i < nCh; i++)
 				{
-					xin[i].resize(bT);
+					xin[i].resize(lfr);
 					bin[i] = xin[i].data();
-					xout[i].resize(bT);
+					xout[i].resize(lfr);
 					bout[i] = xout[i].data();
 				}
 				int n = 0;
-				for (int i = 0; i < bT; i++)
+				float* d2x = d + ifr * nCh;
+				for (int i = 0; i < lfr; i++)
 				{
 					for (int ich = 0; ich < nCh; ich++)
 					{
-						xin[ich][i] = d2[n++];
+						xin[ich][i] = d2x[n++];
 					}
 				}
-				prx.process(SR, nCh, bin.data(), bT, bout.data(),0,0); //*
+
+				std::lock_guard<std::recursive_mutex> lg(mu);
+
+				if (prx.GetChains().size() == 1 && prx.GetChains()[0].A)
+				{
+					std::lock_guard<std::recursive_mutex> lg(CurrentVCm);
+					auto s = CurrentVC[0].size();
+					if (s >= lfr)
+					{
+						prx.process(SR, nCh, bin.data(), lfr, bout.data(), &CurrentVC, 0);
+						CurrentVC[0].erase(CurrentVC[0].begin(), CurrentVC[0].begin() + lfr);
+					}
+					else
+					{
+						prx.process(SR, nCh, bin.data(), lfr, bout.data(), 0, 0);
+					}
+				}
+				else
+					prx.process(SR, nCh, bin.data(), lfr, bout.data(), 0, 0);
+
 				n = 0;
-				for (int i = 0; i < bT; i++)
+				vector<float> d2(lfr * nCh);
+				for (int i = 0; i < lfr; i++)
 				{
 					for (int ich = 0; ich < nCh; ich++)
 					{
@@ -418,22 +349,19 @@ void StartMP3(std::wstring fi)
 					}
 				}
 
-				vector<short> d4(fsz);
-				conv.f32t16(d2.data(), fsz, d4.data());
+				vector<short> d4(lfr * nCh * 2);
+				conv.f32t16(d2.data(), lfr * nCh, d4.data());
 				if (wout)
-					wout->Write((const char*)d4.data(), fsz*2);
+					wout->Write((const char*)d4.data(), lfr * nCh * 2);
 			}
-
-
-			dx.erase(dx.begin(), dx.begin() + BS * 2);
 		}
 
-	}
-
-	acmStreamUnprepareHeader(has, &ash, 0);
-	acmStreamClose(has, 0);
-	fclose(fp);
-
+		if (Ending)
+			return E_FAIL;
+		return S_OK;
+	};
+	ReadFileX(fi.c_str(), foo);
+	wout = 0;
 }
 
 std::wstring OpenSingleFile(HWND hh, const wchar_t* filter, int fidx, const wchar_t* initf, const wchar_t* dir, const wchar_t* title)
@@ -555,7 +483,7 @@ LRESULT CALLBACK Main_DP(HWND hh, UINT mm, WPARAM ww, LPARAM ll)
 				{
 					auto thr = []()
 					{
-						auto fi = OpenSingleFile(0, L"*.mp3\0\0", 0, 0, 0, 0);
+						auto fi = OpenSingleFile(0, L"*.*\0\0", 0, 0, 0, 0);
 						StartMP3(fi.c_str());
 					};
 					std::thread t(thr);
@@ -660,6 +588,7 @@ int __stdcall WinMain(HINSTANCE h, HINSTANCE, LPSTR, int)
 	CoInitializeEx(0, COINIT_APARTMENTTHREADED);
 	INITCOMMONCONTROLSEX icex = { 0 };
 	UpdateThread();
+	MFStartup(MF_VERSION,0);
 
 	COMPBAND b[3];
 	b[0].from = 0;
